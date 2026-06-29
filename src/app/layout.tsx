@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import ThemeRegistry from "@/providers/ThemeRegistry";
+import AppSettingsProvider from "@/providers/AppSettings";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Catálogo de Livros",
-  description: "Controle pessoal de biblioteca",
+  title: "Catálogo de Coleções",
+  description: "Controle pessoal de coleções",
 };
 
 export default function RootLayout({
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
-        <ThemeRegistry>{children}</ThemeRegistry>
+        <ThemeRegistry>
+          <AppSettingsProvider>{children}</AppSettingsProvider>
+        </ThemeRegistry>
       </body>
     </html>
   );

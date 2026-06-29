@@ -21,7 +21,9 @@ import {
   Box,
   Card,
   CardContent,
+  Chip,
   IconButton,
+  Stack,
   Typography,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -29,12 +31,15 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
 import { useEffect, useState } from "react";
 import BookCover from "@/components/BookCover";
+import ProgressRing from "@/components/ProgressRing";
 import { reorderChapters, type Chapter } from "@/lib/tauri";
+import { sortableListModifiers } from "@/lib/dnd";
 
 interface ChapterSortableListProps {
   bookId: number;
   chapters: Chapter[];
   onChaptersChange: (chapters: Chapter[]) => void;
+  onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
   onDelete: (chapter: Chapter) => void;
   onError: (message: string) => void;
@@ -42,10 +47,12 @@ interface ChapterSortableListProps {
 
 function SortableChapterItem({
   chapter,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   chapter: Chapter;
+  onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
   onDelete: (chapter: Chapter) => void;
 }) {
@@ -59,7 +66,9 @@ function SortableChapterItem({
   } = useSortable({ id: chapter.id });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: CSS.Transform.toString(
+      transform ? { ...transform, x: 0 } : null,
+    ),
     transition,
     opacity: isDragging ? 0.85 : 1,
   };
@@ -70,6 +79,8 @@ function SortableChapterItem({
       style={style}
       variant="outlined"
       sx={{
+        width: "100%",
+        maxWidth: "100%",
         borderColor: isDragging ? "primary.main" : "divider",
         boxShadow: isDragging ? 4 : 0,
       }}
@@ -92,28 +103,52 @@ function SortableChapterItem({
         >
           <DragIndicatorIcon fontSize="small" color="action" />
         </IconButton>
-        <BookCover coverPath={chapter.cover_path} size="small" />
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="body1" sx={{ fontWeight: 600 }}>
-            Cap. {chapter.chapter_number}
-            {chapter.chapter_title ? ` — ${chapter.chapter_title}` : ""}
-          </Typography>
-          {chapter.description && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                mt: 0.5,
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-              }}
-            >
-              {chapter.description}
-            </Typography>
-          )}
+        <Box
+          onClick={() => onOpen(chapter)}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            flex: 1,
+            minWidth: 0,
+            cursor: "pointer",
+          }}
+        >
+          <BookCover coverPath={chapter.cover_path} size="small" variant="chapter" />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                Cap. {chapter.chapter_number}
+                {chapter.chapter_title ? ` — ${chapter.chapter_title}` : ""}
+              </Typography>
+              <Chip
+                size="small"
+                label={chapter.owned ? "Possuo" : "Não possuo"}
+                color={chapter.owned ? "success" : "default"}
+                variant="outlined"
+              />
+            </Stack>
+            {chapter.description && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  mt: 0.5,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {chapter.description}
+              </Typography>
+            )}
+          </Box>
         </Box>
+        <ProgressRing
+          ownedCount={chapter.owned_item_count}
+          totalCount={chapter.total_item_count}
+        />
         <IconButton
           size="small"
           onClick={() => onEdit(chapter)}
@@ -138,6 +173,7 @@ export default function ChapterSortableList({
   bookId,
   chapters,
   onChaptersChange,
+  onOpen,
   onEdit,
   onDelete,
   onError,
@@ -195,7 +231,7 @@ export default function ChapterSortableList({
   }
 
   return (
-    <Box>
+    <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
       {items.length > 1 && (
         <Typography
           variant="caption"
@@ -208,17 +244,27 @@ export default function ChapterSortableList({
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        modifiers={sortableListModifiers}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
           items={items.map((item) => item.id)}
           strategy={verticalListSortingStrategy}
         >
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 1.5,
+              width: "100%",
+              maxWidth: "100%",
+            }}
+          >
             {items.map((chapter) => (
               <SortableChapterItem
                 key={chapter.id}
                 chapter={chapter}
+                onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}
               />

@@ -1,4 +1,4 @@
-# Como buildar o Catálogo de Livros
+# Como buildar o Catálogo de Coleções
 
 ## Pré-requisitos
 

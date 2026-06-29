@@ -30,6 +30,7 @@ pub struct DbState {
     conn: Mutex<Connection>,
     book_covers_dir: PathBuf,
     chapter_covers_dir: PathBuf,
+    item_covers_dir: PathBuf,
 }
 
 impl DbState {
@@ -47,11 +48,15 @@ impl DbState {
 
         let book_covers_dir = app_dir.join("covers");
         let chapter_covers_dir = book_covers_dir.join("chapters");
+        let item_covers_dir = book_covers_dir.join("items");
         std::fs::create_dir_all(&book_covers_dir).map_err(|e| {
             rusqlite::Error::InvalidPath(format!("criar diretório de capas: {e}").into())
         })?;
         std::fs::create_dir_all(&chapter_covers_dir).map_err(|e| {
             rusqlite::Error::InvalidPath(format!("criar diretório de capas de capítulos: {e}").into())
+        })?;
+        std::fs::create_dir_all(&item_covers_dir).map_err(|e| {
+            rusqlite::Error::InvalidPath(format!("criar diretório de capas de itens: {e}").into())
         })?;
 
         let conn = Connection::open(&db_path)?;
@@ -63,6 +68,7 @@ impl DbState {
             conn: Mutex::new(conn),
             book_covers_dir,
             chapter_covers_dir,
+            item_covers_dir,
         })
     }
 
@@ -76,6 +82,10 @@ impl DbState {
 
     pub fn chapter_covers_dir(&self) -> PathBuf {
         self.chapter_covers_dir.clone()
+    }
+
+    pub fn item_covers_dir(&self) -> PathBuf {
+        self.item_covers_dir.clone()
     }
 
     pub fn with_conn<F, T>(&self, f: F) -> Result<T>
@@ -124,6 +134,36 @@ fn migrate(conn: &Connection) -> Result<()> {
 
     if !column_exists(conn, "chapters", "cover_image")? {
         conn.execute("ALTER TABLE chapters ADD COLUMN cover_image TEXT", [])?;
+    }
+
+    if !column_exists(conn, "chapters", "owned")? {
+        conn.execute(
+            "ALTER TABLE chapters ADD COLUMN owned INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    let items_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='items'",
+            [],
+            |row| row.get::<_, i32>(0),
+        )?
+        > 0;
+
+    if !items_exists {
+        conn.execute_batch(
+            "CREATE TABLE items (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                chapter_id  INTEGER NOT NULL,
+                item_number INTEGER NOT NULL,
+                item_title  TEXT,
+                description TEXT,
+                cover_image TEXT,
+                owned       INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+            );",
+        )?;
     }
 
     Ok(())

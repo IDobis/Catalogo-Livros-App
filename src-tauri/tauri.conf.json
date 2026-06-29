@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Catalogo Livros",
+  "productName": "Catalogo Colecoes",
   "version": "0.1.0",
   "identifier": "com.catalogo.livros",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Catálogo de Livros",
+        "title": "Catálogo de Coleções",
         "width": 1100,
         "height": 720,
         "minWidth": 800,
@@ -22,10 +22,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost http://localhost:* ws://localhost:*; style-src 'self' 'unsafe-inline' http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; font-src 'self' data:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/com.catalogo.livros/**"]
+        "scope": ["$APPDATA/**"]
       }
     }
   },
@@ -33,9 +33,9 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
+      "icons/a32.png",
+      "icons/a126.png",
+      "icons/a256.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ]

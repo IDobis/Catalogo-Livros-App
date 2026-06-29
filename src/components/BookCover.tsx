@@ -1,12 +1,17 @@
 "use client";
 
 import { Box } from "@mui/material";
+import CollectionsBookmarkIcon from "@mui/icons-material/CollectionsBookmark";
 import MenuBookIcon from "@mui/icons-material/MenuBook";
+import ArticleIcon from "@mui/icons-material/Article";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { isTauri } from "@/lib/tauri";
 
 interface BookCoverProps {
   coverPath: string | null;
   size?: "small" | "medium" | "large" | "list";
+  variant?: "collection" | "chapter" | "item";
 }
 
 const sizes = {
@@ -19,10 +24,22 @@ const sizes = {
 export default function BookCover({
   coverPath,
   size = "small",
+  variant = "collection",
 }: BookCoverProps) {
   const dimensions = sizes[size];
+  const PlaceholderIcon =
+    variant === "collection"
+      ? CollectionsBookmarkIcon
+      : variant === "item"
+        ? ArticleIcon
+        : MenuBookIcon;
+  const [loadError, setLoadError] = useState(false);
 
-  if (!coverPath) {
+  useEffect(() => {
+    setLoadError(false);
+  }, [coverPath]);
+
+  if (!coverPath || loadError || !isTauri()) {
     return (
       <Box
         sx={{
@@ -35,7 +52,7 @@ export default function BookCover({
           justifyContent: "center",
         }}
       >
-        <MenuBookIcon
+        <PlaceholderIcon
           color="disabled"
           fontSize={size === "list" || size === "large" ? "large" : "medium"}
         />
@@ -43,11 +60,14 @@ export default function BookCover({
     );
   }
 
+  const normalizedPath = coverPath.replace(/\\/g, "/");
+
   return (
     <Box
       component="img"
-      src={convertFileSrc(coverPath)}
+      src={convertFileSrc(normalizedPath)}
       alt=""
+      onError={() => setLoadError(true)}
       sx={{
         ...dimensions,
         flexShrink: 0,

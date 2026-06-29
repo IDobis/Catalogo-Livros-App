@@ -6,6 +6,8 @@ export interface Book {
   description: string | null;
   owned: boolean;
   cover_path: string | null;
+  total_chapter_count: number;
+  owned_chapter_count: number;
 }
 
 export interface Chapter {
@@ -15,6 +17,19 @@ export interface Chapter {
   chapter_title: string | null;
   description: string | null;
   cover_path: string | null;
+  owned: boolean;
+  total_item_count: number;
+  owned_item_count: number;
+}
+
+export interface Item {
+  id: number;
+  chapter_id: number;
+  item_number: number;
+  item_title: string | null;
+  description: string | null;
+  cover_path: string | null;
+  owned: boolean;
 }
 
 export interface BackupResult {
@@ -77,11 +92,13 @@ export async function saveChapter(
   bookId: number,
   chapterNumber: number,
   chapterTitle: string | null,
+  owned = false,
 ): Promise<Chapter> {
   return invokeCommand<Chapter>("save_chapter", {
     bookId,
     chapterNumber,
     chapterTitle,
+    owned,
   });
 }
 
@@ -89,11 +106,13 @@ export async function updateChapter(
   id: number,
   chapterTitle: string | null,
   description: string | null,
+  owned: boolean,
 ): Promise<Chapter> {
   return invokeCommand<Chapter>("update_chapter", {
     id,
     chapterTitle,
     description,
+    owned,
   });
 }
 
@@ -118,6 +137,57 @@ export async function reorderChapters(
 
 export async function deleteChapter(id: number): Promise<void> {
   return invokeCommand<void>("delete_chapter", { id });
+}
+
+export async function saveItem(
+  chapterId: number,
+  itemNumber: number,
+  itemTitle: string | null,
+  owned = false,
+): Promise<Item> {
+  return invokeCommand<Item>("save_item", {
+    chapterId,
+    itemNumber,
+    itemTitle,
+    owned,
+  });
+}
+
+export async function updateItem(
+  id: number,
+  itemTitle: string | null,
+  description: string | null,
+  owned: boolean,
+): Promise<Item> {
+  return invokeCommand<Item>("update_item", {
+    id,
+    itemTitle,
+    description,
+    owned,
+  });
+}
+
+export async function setItemCover(itemId: number): Promise<Item> {
+  return invokeCommand<Item>("set_item_cover", { itemId });
+}
+
+export async function removeItemCover(itemId: number): Promise<Item> {
+  return invokeCommand<Item>("remove_item_cover", { itemId });
+}
+
+export async function listItems(chapterId: number): Promise<Item[]> {
+  return invokeCommand<Item[]>("list_items", { chapterId });
+}
+
+export async function reorderItems(
+  chapterId: number,
+  itemIds: number[],
+): Promise<Item[]> {
+  return invokeCommand<Item[]>("reorder_items", { chapterId, itemIds });
+}
+
+export async function deleteItem(id: number): Promise<void> {
+  return invokeCommand<void>("delete_item", { id });
 }
 
 export async function getDatabasePath(): Promise<string> {

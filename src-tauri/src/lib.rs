@@ -14,6 +14,8 @@ pub struct Book {
     pub description: Option<String>,
     pub owned: bool,
     pub cover_path: Option<String>,
+    pub total_chapter_count: i32,
+    pub owned_chapter_count: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,6 +26,20 @@ pub struct Chapter {
     pub chapter_title: Option<String>,
     pub description: Option<String>,
     pub cover_path: Option<String>,
+    pub owned: bool,
+    pub total_item_count: i32,
+    pub owned_item_count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Item {
+    pub id: i64,
+    pub chapter_id: i64,
+    pub item_number: i32,
+    pub item_title: Option<String>,
+    pub description: Option<String>,
+    pub cover_path: Option<String>,
+    pub owned: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +47,18 @@ pub struct BackupResult {
     pub path: String,
     pub message: String,
 }
+
+const BOOK_SELECT: &str = "
+    SELECT
+        b.id,
+        b.title,
+        b.description,
+        b.owned,
+        b.cover_image,
+        (SELECT COUNT(*) FROM chapters c WHERE c.book_id = b.id) AS total_chapter_count,
+        (SELECT COUNT(*) FROM chapters c WHERE c.book_id = b.id AND c.owned = 1) AS owned_chapter_count
+    FROM books b
+";
 
 fn row_to_book(row: &Row, covers_dir: &Path) -> rusqlite::Result<Book> {
     let cover_image: Option<String> = row.get(4)?;
@@ -40,6 +68,8 @@ fn row_to_book(row: &Row, covers_dir: &Path) -> rusqlite::Result<Book> {
         description: row.get(2)?,
         owned: row.get::<_, i32>(3)? != 0,
         cover_path: cover_path(covers_dir, &cover_image),
+        total_chapter_count: row.get(5)?,
+        owned_chapter_count: row.get(6)?,
     })
 }
 
@@ -49,7 +79,7 @@ fn fetch_book(
     covers_dir: &Path,
 ) -> rusqlite::Result<Book> {
     conn.query_row(
-        "SELECT id, title, description, owned, cover_image FROM books WHERE id = ?1",
+        &format!("{BOOK_SELECT} WHERE b.id = ?1"),
         params![id],
         |row| row_to_book(row, covers_dir),
     )
@@ -63,7 +93,7 @@ fn save_book(
     owned: bool,
 ) -> Result<Book, String> {
     if title.trim().is_empty() {
-        return Err("O título do livro é obrigatório.".to_string());
+        return Err("O título da coleção é obrigatório.".to_string());
     }
 
     let covers_dir = state.book_covers_dir();
@@ -87,10 +117,9 @@ fn save_book(
 }
 
 fn fetch_books(conn: &rusqlite::Connection, covers_dir: &Path) -> rusqlite::Result<Vec<Book>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, description, owned, cover_image
-         FROM books ORDER BY sort_order ASC, id ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "{BOOK_SELECT} ORDER BY b.sort_order ASC, b.id ASC"
+    ))?;
 
     let books = stmt
         .query_map([], |row| row_to_book(row, covers_dir))?
@@ -148,7 +177,7 @@ fn update_book(
     owned: bool,
 ) -> Result<Book, String> {
     if title.trim().is_empty() {
-        return Err("O título do livro é obrigatório.".to_string());
+        return Err("O título da coleção é obrigatório.".to_string());
     }
 
     let covers_dir = state.book_covers_dir();
@@ -172,6 +201,7 @@ fn update_book(
 fn delete_book(state: State<DbState>, id: i64) -> Result<(), String> {
     let book_covers_dir = state.book_covers_dir();
     let chapter_covers_dir = state.chapter_covers_dir();
+    let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
             let cover_image: Option<String> = conn.query_row(
@@ -185,10 +215,22 @@ fn delete_book(state: State<DbState>, id: i64) -> Result<(), String> {
                 .query_map(params![id], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
 
+            let item_covers: Vec<Option<String>> = conn
+                .prepare(
+                    "SELECT cover_image FROM items WHERE chapter_id IN (
+                        SELECT id FROM chapters WHERE book_id = ?1
+                    )",
+                )?
+                .query_map(params![id], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+
             conn.execute("DELETE FROM books WHERE id = ?1", params![id])?;
             delete_cover_file(&book_covers_dir, &cover_image);
             for cover in chapter_covers {
                 delete_cover_file(&chapter_covers_dir, &cover);
+            }
+            for cover in item_covers {
+                delete_cover_file(&item_covers_dir, &cover);
             }
             Ok(())
         })
@@ -200,7 +242,7 @@ fn set_book_cover(app: AppHandle, state: State<DbState>, book_id: i64) -> Result
     let selected = app
         .dialog()
         .file()
-        .set_title("Escolher capa do livro")
+        .set_title("Escolher capa da coleção")
         .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
         .blocking_pick_file();
 
@@ -281,6 +323,7 @@ fn save_chapter(
     book_id: i64,
     chapter_number: i32,
     chapter_title: Option<String>,
+    owned: bool,
 ) -> Result<Chapter, String> {
     if chapter_number < 1 {
         return Err("O número do capítulo deve ser maior que zero.".to_string());
@@ -290,8 +333,8 @@ fn save_chapter(
     state
         .with_conn(|conn| {
             conn.execute(
-                "INSERT INTO chapters (book_id, chapter_number, chapter_title) VALUES (?1, ?2, ?3)",
-                params![book_id, chapter_number, chapter_title],
+                "INSERT INTO chapters (book_id, chapter_number, chapter_title, owned) VALUES (?1, ?2, ?3, ?4)",
+                params![book_id, chapter_number, chapter_title, owned as i32],
             )?;
 
             let id = conn.last_insert_rowid();
@@ -299,6 +342,20 @@ fn save_chapter(
         })
         .map_err(|e| e.to_string())
 }
+
+const CHAPTER_SELECT: &str = "
+    SELECT
+        c.id,
+        c.book_id,
+        c.chapter_number,
+        c.chapter_title,
+        c.description,
+        c.cover_image,
+        c.owned,
+        (SELECT COUNT(*) FROM items i WHERE i.chapter_id = c.id) AS total_item_count,
+        (SELECT COUNT(*) FROM items i WHERE i.chapter_id = c.id AND i.owned = 1) AS owned_item_count
+    FROM chapters c
+";
 
 fn row_to_chapter(row: &Row, chapter_covers_dir: &Path) -> rusqlite::Result<Chapter> {
     let cover_image: Option<String> = row.get(5)?;
@@ -309,6 +366,9 @@ fn row_to_chapter(row: &Row, chapter_covers_dir: &Path) -> rusqlite::Result<Chap
         chapter_title: row.get(3)?,
         description: row.get(4)?,
         cover_path: cover_path(chapter_covers_dir, &cover_image),
+        owned: row.get::<_, i32>(6)? != 0,
+        total_item_count: row.get(7)?,
+        owned_item_count: row.get(8)?,
     })
 }
 
@@ -318,8 +378,7 @@ fn fetch_chapter(
     chapter_covers_dir: &Path,
 ) -> rusqlite::Result<Chapter> {
     conn.query_row(
-        "SELECT id, book_id, chapter_number, chapter_title, description, cover_image
-         FROM chapters WHERE id = ?1",
+        &format!("{CHAPTER_SELECT} WHERE c.id = ?1"),
         params![id],
         |row| row_to_chapter(row, chapter_covers_dir),
     )
@@ -330,11 +389,9 @@ fn fetch_chapters(
     book_id: i64,
     chapter_covers_dir: &Path,
 ) -> rusqlite::Result<Vec<Chapter>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, book_id, chapter_number, chapter_title, description, cover_image
-         FROM chapters WHERE book_id = ?1
-         ORDER BY chapter_number ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "{CHAPTER_SELECT} WHERE c.book_id = ?1 ORDER BY c.chapter_number ASC"
+    ))?;
 
     let chapters = stmt
         .query_map(params![book_id], |row| row_to_chapter(row, chapter_covers_dir))?
@@ -349,13 +406,14 @@ fn update_chapter(
     id: i64,
     chapter_title: Option<String>,
     description: Option<String>,
+    owned: bool,
 ) -> Result<Chapter, String> {
     let chapter_covers_dir = state.chapter_covers_dir();
     state
         .with_conn(|conn| {
             let affected = conn.execute(
-                "UPDATE chapters SET chapter_title = ?1, description = ?2 WHERE id = ?3",
-                params![chapter_title, description, id],
+                "UPDATE chapters SET chapter_title = ?1, description = ?2, owned = ?3 WHERE id = ?4",
+                params![chapter_title, description, owned as i32, id],
             )?;
 
             if affected == 0 {
@@ -498,6 +556,7 @@ fn reorder_chapters(
 #[tauri::command]
 fn delete_chapter(state: State<DbState>, id: i64) -> Result<(), String> {
     let chapter_covers_dir = state.chapter_covers_dir();
+    let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
             let cover_image: Option<String> = conn.query_row(
@@ -506,8 +565,253 @@ fn delete_chapter(state: State<DbState>, id: i64) -> Result<(), String> {
                 |row| row.get(0),
             )?;
 
+            let item_covers: Vec<Option<String>> = conn
+                .prepare("SELECT cover_image FROM items WHERE chapter_id = ?1")?
+                .query_map(params![id], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+
             conn.execute("DELETE FROM chapters WHERE id = ?1", params![id])?;
             delete_cover_file(&chapter_covers_dir, &cover_image);
+            for cover in item_covers {
+                delete_cover_file(&item_covers_dir, &cover);
+            }
+            Ok(())
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_item(
+    state: State<DbState>,
+    chapter_id: i64,
+    item_number: i32,
+    item_title: Option<String>,
+    owned: bool,
+) -> Result<Item, String> {
+    if item_number < 1 {
+        return Err("O número do item deve ser maior que zero.".to_string());
+    }
+
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO items (chapter_id, item_number, item_title, owned) VALUES (?1, ?2, ?3, ?4)",
+                params![chapter_id, item_number, item_title, owned as i32],
+            )?;
+
+            let id = conn.last_insert_rowid();
+            fetch_item(conn, id, &item_covers_dir)
+        })
+        .map_err(|e| e.to_string())
+}
+
+fn row_to_item(row: &Row, item_covers_dir: &Path) -> rusqlite::Result<Item> {
+    let cover_image: Option<String> = row.get(5)?;
+    Ok(Item {
+        id: row.get(0)?,
+        chapter_id: row.get(1)?,
+        item_number: row.get(2)?,
+        item_title: row.get(3)?,
+        description: row.get(4)?,
+        cover_path: cover_path(item_covers_dir, &cover_image),
+        owned: row.get::<_, i32>(6)? != 0,
+    })
+}
+
+fn fetch_item(
+    conn: &rusqlite::Connection,
+    id: i64,
+    item_covers_dir: &Path,
+) -> rusqlite::Result<Item> {
+    conn.query_row(
+        "SELECT id, chapter_id, item_number, item_title, description, cover_image, owned
+         FROM items WHERE id = ?1",
+        params![id],
+        |row| row_to_item(row, item_covers_dir),
+    )
+}
+
+fn fetch_items(
+    conn: &rusqlite::Connection,
+    chapter_id: i64,
+    item_covers_dir: &Path,
+) -> rusqlite::Result<Vec<Item>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, chapter_id, item_number, item_title, description, cover_image, owned
+         FROM items WHERE chapter_id = ?1
+         ORDER BY item_number ASC",
+    )?;
+
+    let items = stmt
+        .query_map(params![chapter_id], |row| row_to_item(row, item_covers_dir))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(items)
+}
+
+#[tauri::command]
+fn update_item(
+    state: State<DbState>,
+    id: i64,
+    item_title: Option<String>,
+    description: Option<String>,
+    owned: bool,
+) -> Result<Item, String> {
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| {
+            let affected = conn.execute(
+                "UPDATE items SET item_title = ?1, description = ?2, owned = ?3 WHERE id = ?4",
+                params![item_title, description, owned as i32, id],
+            )?;
+
+            if affected == 0 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
+
+            fetch_item(conn, id, &item_covers_dir)
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_item_cover(app: AppHandle, state: State<DbState>, item_id: i64) -> Result<Item, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Escolher imagem do item")
+        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
+        .blocking_pick_file();
+
+    let Some(FilePath::Path(source)) = selected else {
+        return Err("Seleção de imagem cancelada.".to_string());
+    };
+
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg")
+        .to_lowercase();
+
+    let allowed = ["png", "jpg", "jpeg", "webp", "gif"];
+    if !allowed.contains(&extension.as_str()) {
+        return Err("Formato de imagem não suportado.".to_string());
+    }
+
+    let filename = format!("{item_id}.{extension}");
+    let dest = state.item_covers_dir().join(&filename);
+    let item_covers_dir = state.item_covers_dir();
+
+    state
+        .with_conn(|conn| {
+            let old_cover: Option<String> = conn.query_row(
+                "SELECT cover_image FROM items WHERE id = ?1",
+                params![item_id],
+                |row| row.get(0),
+            )?;
+
+            if old_cover.as_ref().is_some_and(|old| old != &filename) {
+                delete_cover_file(&item_covers_dir, &old_cover);
+            }
+
+            std::fs::copy(&source, &dest)
+                .map_err(|e| rusqlite::Error::InvalidPath(format!("copiar imagem: {e}").into()))?;
+
+            let affected = conn.execute(
+                "UPDATE items SET cover_image = ?1 WHERE id = ?2",
+                params![filename, item_id],
+            )?;
+
+            if affected == 0 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
+
+            fetch_item(conn, item_id, &item_covers_dir)
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_item_cover(state: State<DbState>, item_id: i64) -> Result<Item, String> {
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| {
+            let cover_image: Option<String> = conn.query_row(
+                "SELECT cover_image FROM items WHERE id = ?1",
+                params![item_id],
+                |row| row.get(0),
+            )?;
+
+            delete_cover_file(&item_covers_dir, &cover_image);
+
+            conn.execute(
+                "UPDATE items SET cover_image = NULL WHERE id = ?1",
+                params![item_id],
+            )?;
+
+            fetch_item(conn, item_id, &item_covers_dir)
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_items(state: State<DbState>, chapter_id: i64) -> Result<Vec<Item>, String> {
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| fetch_items(conn, chapter_id, &item_covers_dir))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reorder_items(
+    state: State<DbState>,
+    chapter_id: i64,
+    item_ids: Vec<i64>,
+) -> Result<Vec<Item>, String> {
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| {
+            let existing = fetch_items(conn, chapter_id, &item_covers_dir)?;
+            if existing.len() != item_ids.len() {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+
+            for (index, id) in item_ids.iter().enumerate() {
+                let belongs_to_chapter: bool = conn.query_row(
+                    "SELECT COUNT(*) FROM items WHERE id = ?1 AND chapter_id = ?2",
+                    params![id, chapter_id],
+                    |row| row.get::<_, i32>(0),
+                )? > 0;
+
+                if !belongs_to_chapter {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
+
+                conn.execute(
+                    "UPDATE items SET item_number = ?1 WHERE id = ?2 AND chapter_id = ?3",
+                    params![(index + 1) as i32, id, chapter_id],
+                )?;
+            }
+
+            fetch_items(conn, chapter_id, &item_covers_dir)
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_item(state: State<DbState>, id: i64) -> Result<(), String> {
+    let item_covers_dir = state.item_covers_dir();
+    state
+        .with_conn(|conn| {
+            let cover_image: Option<String> = conn.query_row(
+                "SELECT cover_image FROM items WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )?;
+
+            conn.execute("DELETE FROM items WHERE id = ?1", params![id])?;
+            delete_cover_file(&item_covers_dir, &cover_image);
             Ok(())
         })
         .map_err(|e| e.to_string())
@@ -623,6 +927,13 @@ pub fn run() {
             list_chapters,
             reorder_chapters,
             delete_chapter,
+            save_item,
+            update_item,
+            set_item_cover,
+            remove_item_cover,
+            list_items,
+            reorder_items,
+            delete_item,
             get_database_path,
             export_database,
             import_database,
