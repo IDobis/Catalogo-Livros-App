@@ -17,7 +17,7 @@ import BackupIcon from "@mui/icons-material/Backup";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import SettingsIcon from "@mui/icons-material/Settings";
-import { useAppSettings, type ProgressDisplay } from "@/providers/AppSettings";
+import { useAppSettings, type ProgressDisplay, type ScrollAnimation } from "@/providers/AppSettings";
 import { useColorMode } from "@/providers/ThemeRegistry";
 import BackupDialog from "@/components/BackupPanel";
 
@@ -27,7 +27,8 @@ interface SettingsMenuProps {
 
 export default function SettingsMenu({ onImportComplete }: SettingsMenuProps) {
   const { mode, toggleColorMode } = useColorMode();
-  const { progressDisplay, setProgressDisplay } = useAppSettings();
+  const { progressDisplay, setProgressDisplay, scrollAnimation, setScrollAnimation } =
+    useAppSettings();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [backupOpen, setBackupOpen] = useState(false);
 
@@ -39,6 +40,15 @@ export default function SettingsMenu({ onImportComplete }: SettingsMenuProps) {
   ) => {
     if (value) {
       setProgressDisplay(value);
+    }
+  };
+
+  const handleAnimationChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    value: ScrollAnimation | null,
+  ) => {
+    if (value) {
+      setScrollAnimation(value);
     }
   };
 
@@ -119,6 +129,32 @@ export default function SettingsMenu({ onImportComplete }: SettingsMenuProps) {
           >
             <ToggleButton value="count">Números (2/5)</ToggleButton>
             <ToggleButton value="percent">Porcentagem (20%)</ToggleButton>
+          </ToggleButtonGroup>
+        </MenuItem>
+
+        <Divider sx={{ my: 1 }} />
+
+        <MenuItem disabled sx={{ opacity: 1, cursor: "default" }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Animação ao abrir
+          </Typography>
+        </MenuItem>
+
+        <MenuItem
+          disableRipple
+          sx={{ flexDirection: "column", alignItems: "stretch", gap: 1, py: 1.5 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ToggleButtonGroup
+            value={scrollAnimation}
+            exclusive
+            fullWidth
+            size="small"
+            onChange={handleAnimationChange}
+          >
+            <ToggleButton value="smooth">Smooth</ToggleButton>
+            <ToggleButton value="linear">Linear</ToggleButton>
+            <ToggleButton value="none">None</ToggleButton>
           </ToggleButtonGroup>
         </MenuItem>
       </Menu>

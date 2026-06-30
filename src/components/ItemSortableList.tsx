@@ -29,8 +29,9 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import BookCover from "@/components/BookCover";
+import ScrollReveal from "@/components/ScrollReveal";
 import { itemDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
 import { matchesItem, normalizeSearchQuery } from "@/lib/search";
@@ -41,6 +42,7 @@ interface ItemSortableListProps {
   items: Item[];
   coverCacheKey?: number;
   searchQuery?: string;
+  loading?: boolean;
   onItemsChange: (items: Item[]) => void;
   onEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
@@ -50,11 +52,13 @@ interface ItemSortableListProps {
 function SortableItemRow({
   item,
   coverCacheKey,
+  index,
   onEdit,
   onDelete,
 }: {
   item: Item;
   coverCacheKey?: number;
+  index: number;
   onEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
 }) {
@@ -72,21 +76,25 @@ function SortableItemRow({
       transform ? { ...transform, x: 0 } : null,
     ),
     transition,
-    opacity: isDragging ? 0.85 : 1,
   };
 
   return (
-    <Card
+    <Box
       ref={setNodeRef}
       style={style}
-      variant="outlined"
-      sx={{
-        width: "100%",
-        maxWidth: "100%",
-        borderColor: isDragging ? "primary.main" : "divider",
-        boxShadow: isDragging ? 4 : 0,
-      }}
+      sx={{ width: "100%", maxWidth: "100%" }}
     >
+      <ScrollReveal index={index} disabled={isDragging}>
+        <Card
+          variant="outlined"
+          sx={{
+            width: "100%",
+            maxWidth: "100%",
+            borderColor: isDragging ? "primary.main" : "divider",
+            boxShadow: isDragging ? 4 : 0,
+            opacity: isDragging ? 0.85 : 1,
+          }}
+        >
       <CardContent
         sx={{
           display: "flex",
@@ -155,7 +163,9 @@ function SortableItemRow({
           <DeleteIcon fontSize="small" />
         </IconButton>
       </CardContent>
-    </Card>
+        </Card>
+      </ScrollReveal>
+    </Box>
   );
 }
 
@@ -168,8 +178,10 @@ export default function ItemSortableList({
   onEdit,
   onDelete,
   onError,
+  loading = false,
 }: ItemSortableListProps) {
   const [listItems, setListItems] = useState(items);
+  const isReorderingRef = useRef(false);
   const normalizedQuery = normalizeSearchQuery(searchQuery);
   const filteredItems = useMemo(
     () => listItems.filter((item) => matchesItem(item, normalizedQuery)),
@@ -177,7 +189,8 @@ export default function ItemSortableList({
   );
   const isSearching = normalizedQuery.length > 0;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (isReorderingRef.current) return;
     setListItems(items);
   }, [items]);
 
@@ -189,37 +202,45 @@ export default function ItemSortableList({
   );
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = listItems.findIndex((item) => item.id === active.id);
-    const newIndex = listItems.findIndex((item) => item.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(listItems, oldIndex, newIndex).map(
-      (item, index) => ({
-        ...item,
-        item_number: index + 1,
-      }),
-    );
-
-    const previous = listItems;
-    setListItems(reordered);
-
     try {
-      const updated = await reorderItems(
-        chapterId,
-        reordered.map((item) => item.id),
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = listItems.findIndex((item) => item.id === active.id);
+      const newIndex = listItems.findIndex((item) => item.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(listItems, oldIndex, newIndex).map(
+        (item, index) => ({
+          ...item,
+          item_number: index + 1,
+        }),
       );
-      setListItems(updated);
-      onItemsChange(updated);
-    } catch (e) {
-      setListItems(previous);
-      onError(e instanceof Error ? e.message : "Erro ao reordenar itens.");
+
+      const previous = listItems;
+      setListItems(reordered);
+
+      try {
+        const updated = await reorderItems(
+          chapterId,
+          reordered.map((item) => item.id),
+        );
+        setListItems(updated);
+        onItemsChange(updated);
+      } catch (e) {
+        setListItems(previous);
+        onError(e instanceof Error ? e.message : "Erro ao reordenar itens.");
+      }
+    } finally {
+      isReorderingRef.current = false;
     }
   };
 
-  if (listItems.length === 0) {
+  if (loading) {
+    return <Box aria-busy="true" sx={{ minHeight: 48 }} />;
+  }
+
+  if (items.length === 0) {
     return (
       <Typography color="text.secondary">
         Nenhum item cadastrado.
@@ -247,11 +268,12 @@ export default function ItemSortableList({
             maxWidth: "100%",
           }}
         >
-          {filteredItems.map((item) => (
+          {filteredItems.map((item, index) => (
             <SortableItemRow
               key={item.id}
               item={item}
               coverCacheKey={coverCacheKey}
+              index={index}
               onEdit={onEdit}
               onDelete={onDelete}
             />
@@ -276,6 +298,12 @@ export default function ItemSortableList({
         sensors={sensors}
         collisionDetection={closestCenter}
         modifiers={sortableListModifiers}
+        onDragStart={() => {
+          isReorderingRef.current = true;
+        }}
+        onDragCancel={() => {
+          isReorderingRef.current = false;
+        }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -291,11 +319,12 @@ export default function ItemSortableList({
               maxWidth: "100%",
             }}
           >
-            {listItems.map((item) => (
+            {listItems.map((item, index) => (
               <SortableItemRow
                 key={item.id}
                 item={item}
                 coverCacheKey={coverCacheKey}
+                index={index}
                 onEdit={onEdit}
                 onDelete={onDelete}
               />

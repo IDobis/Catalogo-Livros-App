@@ -49,7 +49,8 @@ A primeira build pode demorar vários minutos.
 | Tipo | Caminho |
 |------|---------|
 | .exe portátil | `src-tauri\target\release\app.exe` |
-| Instalador | `src-tauri\target\release\bundle\nsis\` |
+| Instalador MSI (x64) | `src-tauri\target\release\bundle\msi\Catalogo_Colecoes_0.5_x64.msi` |
+| Instalador NSIS | `src-tauri\target\release\bundle\nsis\` |
 
 ---
 

@@ -118,6 +118,9 @@ export default function LibraryView() {
   const [chapterDescriptionError, setChapterDescriptionError] = useState<string | null>(null);
   const [itemTitleError, setItemTitleError] = useState<string | null>(null);
   const [itemDescriptionError, setItemDescriptionError] = useState<string | null>(null);
+  const [booksLoading, setBooksLoading] = useState(true);
+  const [chaptersLoading, setChaptersLoading] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     open: false,
@@ -155,6 +158,7 @@ export default function LibraryView() {
   };
 
   const loadBooks = useCallback(async () => {
+    setBooksLoading(true);
     try {
       const data = await listBooks();
       setBooks(data);
@@ -164,10 +168,13 @@ export default function LibraryView() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar coleções.");
+    } finally {
+      setBooksLoading(false);
     }
   }, []);
 
   const loadChapters = useCallback(async (bookId: number) => {
+    setChaptersLoading(true);
     try {
       const data = await listChapters(bookId);
       setChapters(data);
@@ -177,15 +184,20 @@ export default function LibraryView() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar capítulos.");
+    } finally {
+      setChaptersLoading(false);
     }
   }, []);
 
   const loadItems = useCallback(async (chapterId: number) => {
+    setItemsLoading(true);
     try {
       const data = await listItems(chapterId);
       setItems(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar itens.");
+    } finally {
+      setItemsLoading(false);
     }
   }, []);
 
@@ -731,6 +743,7 @@ export default function LibraryView() {
             books={books}
             coverCacheKey={coverCacheEpoch}
             searchQuery={searchQuery}
+            loading={booksLoading}
             onBooksChange={setBooks}
             onOpen={handleOpenBook}
             onEdit={openEditForm}
@@ -802,6 +815,7 @@ export default function LibraryView() {
             coverCacheKey={coverCacheEpoch}
             searchQuery={searchQuery}
             items={items}
+            loading={itemsLoading}
             onItemsChange={setItems}
             onEdit={openEditItemForm}
             onDelete={handleDeleteItem}
@@ -872,6 +886,7 @@ export default function LibraryView() {
             coverCacheKey={coverCacheEpoch}
             searchQuery={searchQuery}
             chapters={chapters}
+            loading={chaptersLoading}
             onChaptersChange={setChapters}
             onOpen={handleOpenChapter}
             onEdit={openEditChapterForm}

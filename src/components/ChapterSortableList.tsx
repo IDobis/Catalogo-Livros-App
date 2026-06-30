@@ -29,9 +29,10 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import BookCover from "@/components/BookCover";
 import ProgressRing from "@/components/ProgressRing";
+import ScrollReveal from "@/components/ScrollReveal";
 import { chapterDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
 import { matchesChapter, normalizeSearchQuery } from "@/lib/search";
@@ -42,6 +43,7 @@ interface ChapterSortableListProps {
   chapters: Chapter[];
   coverCacheKey?: number;
   searchQuery?: string;
+  loading?: boolean;
   onChaptersChange: (chapters: Chapter[]) => void;
   onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
@@ -52,12 +54,14 @@ interface ChapterSortableListProps {
 function SortableChapterItem({
   chapter,
   coverCacheKey,
+  index,
   onOpen,
   onEdit,
   onDelete,
 }: {
   chapter: Chapter;
   coverCacheKey?: number;
+  index: number;
   onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
   onDelete: (chapter: Chapter) => void;
@@ -76,21 +80,25 @@ function SortableChapterItem({
       transform ? { ...transform, x: 0 } : null,
     ),
     transition,
-    opacity: isDragging ? 0.85 : 1,
   };
 
   return (
-    <Card
+    <Box
       ref={setNodeRef}
       style={style}
-      variant="outlined"
-      sx={{
-        width: "100%",
-        maxWidth: "100%",
-        borderColor: isDragging ? "primary.main" : "divider",
-        boxShadow: isDragging ? 4 : 0,
-      }}
+      sx={{ width: "100%", maxWidth: "100%" }}
     >
+      <ScrollReveal index={index} disabled={isDragging}>
+        <Card
+          variant="outlined"
+          sx={{
+            width: "100%",
+            maxWidth: "100%",
+            borderColor: isDragging ? "primary.main" : "divider",
+            boxShadow: isDragging ? 4 : 0,
+            opacity: isDragging ? 0.85 : 1,
+          }}
+        >
       <CardContent
         sx={{
           display: "flex",
@@ -175,7 +183,9 @@ function SortableChapterItem({
           <DeleteIcon fontSize="small" />
         </IconButton>
       </CardContent>
-    </Card>
+        </Card>
+      </ScrollReveal>
+    </Box>
   );
 }
 
@@ -189,8 +199,10 @@ export default function ChapterSortableList({
   onEdit,
   onDelete,
   onError,
+  loading = false,
 }: ChapterSortableListProps) {
   const [items, setItems] = useState(chapters);
+  const isReorderingRef = useRef(false);
   const normalizedQuery = normalizeSearchQuery(searchQuery);
   const filteredItems = useMemo(
     () => items.filter((chapter) => matchesChapter(chapter, normalizedQuery)),
@@ -198,7 +210,8 @@ export default function ChapterSortableList({
   );
   const isSearching = normalizedQuery.length > 0;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (isReorderingRef.current) return;
     setItems(chapters);
   }, [chapters]);
 
@@ -210,37 +223,45 @@ export default function ChapterSortableList({
   );
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = items.findIndex((item) => item.id === active.id);
-    const newIndex = items.findIndex((item) => item.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(items, oldIndex, newIndex).map(
-      (chapter, index) => ({
-        ...chapter,
-        chapter_number: index + 1,
-      }),
-    );
-
-    const previous = items;
-    setItems(reordered);
-
     try {
-      const updated = await reorderChapters(
-        bookId,
-        reordered.map((chapter) => chapter.id),
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = items.findIndex((item) => item.id === active.id);
+      const newIndex = items.findIndex((item) => item.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(items, oldIndex, newIndex).map(
+        (chapter, index) => ({
+          ...chapter,
+          chapter_number: index + 1,
+        }),
       );
-      setItems(updated);
-      onChaptersChange(updated);
-    } catch (e) {
-      setItems(previous);
-      onError(e instanceof Error ? e.message : "Erro ao reordenar capítulos.");
+
+      const previous = items;
+      setItems(reordered);
+
+      try {
+        const updated = await reorderChapters(
+          bookId,
+          reordered.map((chapter) => chapter.id),
+        );
+        setItems(updated);
+        onChaptersChange(updated);
+      } catch (e) {
+        setItems(previous);
+        onError(e instanceof Error ? e.message : "Erro ao reordenar capítulos.");
+      }
+    } finally {
+      isReorderingRef.current = false;
     }
   };
 
-  if (items.length === 0) {
+  if (loading) {
+    return <Box aria-busy="true" sx={{ minHeight: 48 }} />;
+  }
+
+  if (chapters.length === 0) {
     return (
       <Typography color="text.secondary">
         Nenhum capítulo cadastrado.
@@ -268,11 +289,12 @@ export default function ChapterSortableList({
             maxWidth: "100%",
           }}
         >
-          {filteredItems.map((chapter) => (
+          {filteredItems.map((chapter, index) => (
             <SortableChapterItem
               key={chapter.id}
               chapter={chapter}
               coverCacheKey={coverCacheKey}
+              index={index}
               onOpen={onOpen}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -298,6 +320,12 @@ export default function ChapterSortableList({
         sensors={sensors}
         collisionDetection={closestCenter}
         modifiers={sortableListModifiers}
+        onDragStart={() => {
+          isReorderingRef.current = true;
+        }}
+        onDragCancel={() => {
+          isReorderingRef.current = false;
+        }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -313,11 +341,12 @@ export default function ChapterSortableList({
               maxWidth: "100%",
             }}
           >
-            {items.map((chapter) => (
+            {items.map((chapter, index) => (
               <SortableChapterItem
                 key={chapter.id}
                 chapter={chapter}
                 coverCacheKey={coverCacheKey}
+                index={index}
                 onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}

@@ -27,9 +27,10 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import BookCover from "@/components/BookCover";
 import ProgressRing from "@/components/ProgressRing";
+import ScrollReveal from "@/components/ScrollReveal";
 import { reorderBooks, type Book } from "@/lib/tauri";
 import { bookDisplayTitle } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
@@ -39,6 +40,7 @@ interface BookSortableListProps {
   books: Book[];
   coverCacheKey?: number;
   searchQuery?: string;
+  loading?: boolean;
   onBooksChange: (books: Book[]) => void;
   onOpen: (book: Book) => void;
   onEdit: (book: Book) => void;
@@ -49,12 +51,14 @@ interface BookSortableListProps {
 function SortableBookItem({
   book,
   coverCacheKey,
+  index,
   onOpen,
   onEdit,
   onDelete,
 }: {
   book: Book;
   coverCacheKey?: number;
+  index: number;
   onOpen: (book: Book) => void;
   onEdit: (book: Book) => void;
   onDelete: (book: Book) => void;
@@ -73,21 +77,25 @@ function SortableBookItem({
       transform ? { ...transform, x: 0 } : null,
     ),
     transition,
-    opacity: isDragging ? 0.85 : 1,
   };
 
   return (
-    <Card
+    <Box
       ref={setNodeRef}
       style={style}
-      variant="outlined"
-      sx={{
-        width: "100%",
-        maxWidth: "100%",
-        borderColor: isDragging ? "primary.main" : "divider",
-        boxShadow: isDragging ? 4 : 0,
-      }}
+      sx={{ width: "100%", maxWidth: "100%" }}
     >
+      <ScrollReveal index={index} disabled={isDragging}>
+        <Card
+          variant="outlined"
+          sx={{
+            width: "100%",
+            maxWidth: "100%",
+            borderColor: isDragging ? "primary.main" : "divider",
+            boxShadow: isDragging ? 4 : 0,
+            opacity: isDragging ? 0.85 : 1,
+          }}
+        >
       <CardContent
         sx={{
           display: "flex",
@@ -164,7 +172,9 @@ function SortableBookItem({
           <DeleteIcon fontSize="small" />
         </IconButton>
       </CardContent>
-    </Card>
+        </Card>
+      </ScrollReveal>
+    </Box>
   );
 }
 
@@ -177,8 +187,10 @@ export default function BookSortableList({
   onEdit,
   onDelete,
   onError,
+  loading = false,
 }: BookSortableListProps) {
   const [items, setItems] = useState(books);
+  const isReorderingRef = useRef(false);
   const normalizedQuery = normalizeSearchQuery(searchQuery);
   const filteredItems = useMemo(
     () => items.filter((book) => matchesBook(book, normalizedQuery)),
@@ -186,7 +198,8 @@ export default function BookSortableList({
   );
   const isSearching = normalizedQuery.length > 0;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (isReorderingRef.current) return;
     setItems(books);
   }, [books]);
 
@@ -198,28 +211,36 @@ export default function BookSortableList({
   );
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = items.findIndex((item) => item.id === active.id);
-    const newIndex = items.findIndex((item) => item.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(items, oldIndex, newIndex);
-    const previous = items;
-    setItems(reordered);
-
     try {
-      const updated = await reorderBooks(reordered.map((book) => book.id));
-      setItems(updated);
-      onBooksChange(updated);
-    } catch (e) {
-      setItems(previous);
-      onError(e instanceof Error ? e.message : "Erro ao reordenar coleções.");
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = items.findIndex((item) => item.id === active.id);
+      const newIndex = items.findIndex((item) => item.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(items, oldIndex, newIndex);
+      const previous = items;
+      setItems(reordered);
+
+      try {
+        const updated = await reorderBooks(reordered.map((book) => book.id));
+        setItems(updated);
+        onBooksChange(updated);
+      } catch (e) {
+        setItems(previous);
+        onError(e instanceof Error ? e.message : "Erro ao reordenar coleções.");
+      }
+    } finally {
+      isReorderingRef.current = false;
     }
   };
 
-  if (items.length === 0) {
+  if (loading) {
+    return <Box aria-busy="true" sx={{ minHeight: 48 }} />;
+  }
+
+  if (books.length === 0) {
     return (
       <Typography color="text.secondary" textAlign="center">
         Nenhuma coleção cadastrada. Clique em &quot;Nova coleção&quot; para começar.
@@ -247,11 +268,12 @@ export default function BookSortableList({
             maxWidth: "100%",
           }}
         >
-          {filteredItems.map((book) => (
+          {filteredItems.map((book, index) => (
             <SortableBookItem
               key={book.id}
               book={book}
               coverCacheKey={coverCacheKey}
+              index={index}
               onOpen={onOpen}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -277,6 +299,12 @@ export default function BookSortableList({
         sensors={sensors}
         collisionDetection={closestCenter}
         modifiers={sortableListModifiers}
+        onDragStart={() => {
+          isReorderingRef.current = true;
+        }}
+        onDragCancel={() => {
+          isReorderingRef.current = false;
+        }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -292,11 +320,12 @@ export default function BookSortableList({
               maxWidth: "100%",
             }}
           >
-            {items.map((book) => (
+            {items.map((book, index) => (
               <SortableBookItem
                 key={book.id}
                 book={book}
                 coverCacheKey={coverCacheKey}
+                index={index}
                 onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}

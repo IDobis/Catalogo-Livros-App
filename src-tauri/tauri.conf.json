@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Catalogo Colecoes",
-  "version": "0.1.0",
+  "productName": "Catalogo_Colecoes",
+  "version": "0.5.0",
   "identifier": "com.catalogo.livros",
   "build": {
     "frontendDist": "../out",
