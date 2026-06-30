@@ -25,6 +25,7 @@ import BookSortableList from "@/components/BookSortableList";
 import ChapterSortableList from "@/components/ChapterSortableList";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import ItemSortableList from "@/components/ItemSortableList";
+import { chapterDisplayName, itemDisplayName } from "@/lib/labels";
 import {
   deleteBook,
   deleteChapter,
@@ -92,8 +93,6 @@ export default function LibraryView() {
   const [form, setForm] = useState<BookFormState>(emptyBookForm);
   const [chapterEditForm, setChapterEditForm] = useState<ChapterFormState>(emptyChapterForm);
   const [itemEditForm, setItemEditForm] = useState<ItemFormState>(emptyItemForm);
-  const [chapterForm, setChapterForm] = useState({ number: "", title: "" });
-  const [itemForm, setItemForm] = useState({ number: "", title: "" });
   const [error, setError] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     open: false,
@@ -207,20 +206,35 @@ export default function LibraryView() {
     setItemFormOpen(true);
   };
 
+  const openCreateItemForm = () => {
+    setEditingItem(null);
+    setItemEditForm(emptyItemForm);
+    setItemFormOpen(true);
+  };
+
   const handleSaveItem = async () => {
-    if (!editingItem || !selectedChapter) return;
+    if (!selectedChapter || !selectedBook) return;
     try {
-      await updateItem(
-        editingItem.id,
-        itemEditForm.title.trim() || null,
-        itemEditForm.description.trim() || null,
-        itemEditForm.owned,
-      );
-      setItemFormOpen(false);
-      await loadItems(selectedChapter.id);
-      if (selectedBook) {
-        await loadChapters(selectedBook.id);
+      if (editingItem) {
+        await updateItem(
+          editingItem.id,
+          itemEditForm.title.trim() || null,
+          itemEditForm.description.trim() || null,
+          itemEditForm.owned,
+        );
+      } else {
+        await saveItem(
+          selectedChapter.id,
+          itemEditForm.title.trim() || null,
+          itemEditForm.description.trim() || null,
+          itemEditForm.owned,
+        );
       }
+      setItemFormOpen(false);
+      setEditingItem(null);
+      await loadItems(selectedChapter.id);
+      await loadChapters(selectedBook.id);
+      await loadBooks();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao salvar item.");
     }
@@ -272,21 +286,37 @@ export default function LibraryView() {
     setChapterFormOpen(true);
   };
 
+  const openCreateChapterForm = () => {
+    setEditingChapter(null);
+    setChapterEditForm(emptyChapterForm);
+    setChapterFormOpen(true);
+  };
+
   const handleSaveChapter = async () => {
-    if (!editingChapter || !selectedBook) return;
+    if (!selectedBook) return;
     try {
-      const updated = await updateChapter(
-        editingChapter.id,
-        chapterEditForm.title.trim() || null,
-        chapterEditForm.description.trim() || null,
-        chapterEditForm.owned,
-      );
+      if (editingChapter) {
+        const updated = await updateChapter(
+          editingChapter.id,
+          chapterEditForm.title.trim() || null,
+          chapterEditForm.description.trim() || null,
+          chapterEditForm.owned,
+        );
+        if (selectedChapter?.id === updated.id) {
+          setSelectedChapter(updated);
+        }
+      } else {
+        await saveChapter(
+          selectedBook.id,
+          chapterEditForm.title.trim() || null,
+          chapterEditForm.description.trim() || null,
+          chapterEditForm.owned,
+        );
+      }
       setChapterFormOpen(false);
+      setEditingChapter(null);
       await loadChapters(selectedBook.id);
       await loadBooks();
-      if (editingChapter.id === updated.id) {
-        setEditingChapter(updated);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao salvar capítulo.");
     }
@@ -421,41 +451,16 @@ export default function LibraryView() {
   const handleBack = () => {
     if (selectedChapter) {
       setSelectedChapter(null);
-      setItemForm({ number: "", title: "" });
       setError(null);
       return;
     }
     setSelectedBook(null);
-    setChapterForm({ number: "", title: "" });
     setError(null);
     void loadBooks();
   };
 
-  const handleAddChapter = async () => {
-    if (!selectedBook) return;
-    const number = parseInt(chapterForm.number, 10);
-    if (Number.isNaN(number) || number < 1) {
-      setError("Informe um número de capítulo válido.");
-      return;
-    }
-    try {
-      await saveChapter(
-        selectedBook.id,
-        number,
-        chapterForm.title.trim() || null,
-      );
-      setChapterForm({ number: "", title: "" });
-      await loadChapters(selectedBook.id);
-      await loadBooks();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao salvar capítulo.");
-    }
-  };
-
   const handleDeleteChapter = (chapter: Chapter) => {
-    const title = chapter.chapter_title
-      ? `Cap. ${chapter.chapter_number} — ${chapter.chapter_title}`
-      : `Cap. ${chapter.chapter_number}`;
+    const title = chapterDisplayName(chapter);
     openConfirm(
       "Excluir capítulo?",
       `Tem certeza que deseja excluir o capítulo "${title}"? Esta ação não pode ser desfeita.`,
@@ -477,33 +482,8 @@ export default function LibraryView() {
     );
   };
 
-  const handleAddItem = async () => {
-    if (!selectedChapter) return;
-    const number = parseInt(itemForm.number, 10);
-    if (Number.isNaN(number) || number < 1) {
-      setError("Informe um número de item válido.");
-      return;
-    }
-    try {
-      await saveItem(
-        selectedChapter.id,
-        number,
-        itemForm.title.trim() || null,
-      );
-      setItemForm({ number: "", title: "" });
-      await loadItems(selectedChapter.id);
-      if (selectedBook) {
-        await loadChapters(selectedBook.id);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao salvar item.");
-    }
-  };
-
   const handleDeleteItem = (item: Item) => {
-    const title = item.item_title
-      ? `Item ${item.item_number} — ${item.item_title}`
-      : `Item ${item.item_number}`;
+    const title = itemDisplayName(item);
     openConfirm(
       "Excluir item?",
       `Tem certeza que deseja excluir o item "${title}"? Esta ação não pode ser desfeita.`,
@@ -514,6 +494,7 @@ export default function LibraryView() {
             await loadItems(selectedChapter.id);
             if (selectedBook) {
               await loadChapters(selectedBook.id);
+              await loadBooks();
             }
           }
         } catch (e) {
@@ -570,10 +551,7 @@ export default function LibraryView() {
             <BookCover coverPath={selectedChapter.cover_path} size="medium" variant="chapter" />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="h6" noWrap>
-                Cap. {selectedChapter.chapter_number}
-                {selectedChapter.chapter_title
-                  ? ` — ${selectedChapter.chapter_title}`
-                  : ""}
+                {chapterDisplayName(selectedChapter)}
               </Typography>
             </Box>
             <IconButton onClick={() => openEditChapterForm(selectedChapter)}>
@@ -581,32 +559,22 @@ export default function LibraryView() {
             </IconButton>
           </Stack>
 
-          <Typography variant="subtitle1" sx={{ mb: 2 }}>
-            Itens
-          </Typography>
-
-          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-            <TextField
+          <Stack
+            direction="row"
+            sx={{
+              mb: 2,
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Typography variant="subtitle1">Itens</Typography>
+            <Button
+              variant="outlined"
               size="small"
-              label="Nº"
-              type="number"
-              value={itemForm.number}
-              onChange={(e) =>
-                setItemForm((f) => ({ ...f, number: e.target.value }))
-              }
-              sx={{ width: 90 }}
-            />
-            <TextField
-              size="small"
-              label="Título do item"
-              value={itemForm.title}
-              onChange={(e) =>
-                setItemForm((f) => ({ ...f, title: e.target.value }))
-              }
-              fullWidth
-            />
-            <Button variant="outlined" onClick={handleAddItem}>
-              Adicionar
+              startIcon={<AddIcon />}
+              onClick={openCreateItemForm}
+            >
+              Novo item
             </Button>
           </Stack>
 
@@ -636,32 +604,22 @@ export default function LibraryView() {
             </IconButton>
           </Stack>
 
-          <Typography variant="subtitle1" sx={{ mb: 2 }}>
-            Capítulos
-          </Typography>
-
-          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-            <TextField
+          <Stack
+            direction="row"
+            sx={{
+              mb: 2,
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Typography variant="subtitle1">Capítulos</Typography>
+            <Button
+              variant="outlined"
               size="small"
-              label="Nº"
-              type="number"
-              value={chapterForm.number}
-              onChange={(e) =>
-                setChapterForm((f) => ({ ...f, number: e.target.value }))
-              }
-              sx={{ width: 90 }}
-            />
-            <TextField
-              size="small"
-              label="Título do capítulo"
-              value={chapterForm.title}
-              onChange={(e) =>
-                setChapterForm((f) => ({ ...f, title: e.target.value }))
-              }
-              fullWidth
-            />
-            <Button variant="outlined" onClick={handleAddChapter}>
-              Adicionar
+              startIcon={<AddIcon />}
+              onClick={openCreateChapterForm}
+            >
+              Novo capítulo
             </Button>
           </Stack>
 
@@ -745,11 +703,16 @@ export default function LibraryView() {
 
       <Dialog
         open={chapterFormOpen}
-        onClose={() => setChapterFormOpen(false)}
+        onClose={() => {
+          setChapterFormOpen(false);
+          setEditingChapter(null);
+        }}
         fullWidth
         maxWidth="sm"
       >
-        <DialogTitle>Editar capítulo</DialogTitle>
+        <DialogTitle>
+          {editingChapter ? "Editar capítulo" : "Novo capítulo"}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {editingChapter && (
@@ -825,11 +788,16 @@ export default function LibraryView() {
 
       <Dialog
         open={itemFormOpen}
-        onClose={() => setItemFormOpen(false)}
+        onClose={() => {
+          setItemFormOpen(false);
+          setEditingItem(null);
+        }}
         fullWidth
         maxWidth="sm"
       >
-        <DialogTitle>Editar item</DialogTitle>
+        <DialogTitle>
+          {editingItem ? "Editar item" : "Novo item"}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {editingItem && (

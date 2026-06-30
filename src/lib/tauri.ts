@@ -90,14 +90,14 @@ export async function removeBookCover(bookId: number): Promise<Book> {
 
 export async function saveChapter(
   bookId: number,
-  chapterNumber: number,
   chapterTitle: string | null,
+  description: string | null = null,
   owned = false,
 ): Promise<Chapter> {
   return invokeCommand<Chapter>("save_chapter", {
     bookId,
-    chapterNumber,
     chapterTitle,
+    description,
     owned,
   });
 }
@@ -141,14 +141,14 @@ export async function deleteChapter(id: number): Promise<void> {
 
 export async function saveItem(
   chapterId: number,
-  itemNumber: number,
   itemTitle: string | null,
+  description: string | null = null,
   owned = false,
 ): Promise<Item> {
   return invokeCommand<Item>("save_item", {
     chapterId,
-    itemNumber,
     itemTitle,
+    description,
     owned,
   });
 }

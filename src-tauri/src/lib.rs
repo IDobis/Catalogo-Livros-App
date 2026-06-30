@@ -321,20 +321,28 @@ fn remove_book_cover(state: State<DbState>, book_id: i64) -> Result<Book, String
 fn save_chapter(
     state: State<DbState>,
     book_id: i64,
-    chapter_number: i32,
     chapter_title: Option<String>,
+    description: Option<String>,
     owned: bool,
 ) -> Result<Chapter, String> {
-    if chapter_number < 1 {
-        return Err("O número do capítulo deve ser maior que zero.".to_string());
-    }
-
     let chapter_covers_dir = state.chapter_covers_dir();
     state
         .with_conn(|conn| {
+            let chapter_number: i32 = conn.query_row(
+                "SELECT COALESCE(MAX(chapter_number), 0) + 1 FROM chapters WHERE book_id = ?1",
+                params![book_id],
+                |row| row.get(0),
+            )?;
+
             conn.execute(
-                "INSERT INTO chapters (book_id, chapter_number, chapter_title, owned) VALUES (?1, ?2, ?3, ?4)",
-                params![book_id, chapter_number, chapter_title, owned as i32],
+                "INSERT INTO chapters (book_id, chapter_number, chapter_title, description, owned) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    book_id,
+                    chapter_number,
+                    chapter_title,
+                    description,
+                    owned as i32
+                ],
             )?;
 
             let id = conn.last_insert_rowid();
@@ -584,23 +592,32 @@ fn delete_chapter(state: State<DbState>, id: i64) -> Result<(), String> {
 fn save_item(
     state: State<DbState>,
     chapter_id: i64,
-    item_number: i32,
     item_title: Option<String>,
+    description: Option<String>,
     owned: bool,
 ) -> Result<Item, String> {
-    if item_number < 1 {
-        return Err("O número do item deve ser maior que zero.".to_string());
-    }
-
     let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
+            let item_number: i32 = conn.query_row(
+                "SELECT COALESCE(MAX(item_number), 0) + 1 FROM items WHERE chapter_id = ?1",
+                params![chapter_id],
+                |row| row.get(0),
+            )?;
+
             conn.execute(
-                "INSERT INTO items (chapter_id, item_number, item_title, owned) VALUES (?1, ?2, ?3, ?4)",
-                params![chapter_id, item_number, item_title, owned as i32],
+                "INSERT INTO items (chapter_id, item_number, item_title, description, owned) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    chapter_id,
+                    item_number,
+                    item_title,
+                    description,
+                    owned as i32
+                ],
             )?;
 
             let id = conn.last_insert_rowid();
+            sync_chapter_owned_from_items(conn, chapter_id)?;
             fetch_item(conn, id, &item_covers_dir)
         })
         .map_err(|e| e.to_string())
@@ -650,6 +667,32 @@ fn fetch_items(
     Ok(items)
 }
 
+fn sync_chapter_owned_from_items(
+    conn: &rusqlite::Connection,
+    chapter_id: i64,
+) -> rusqlite::Result<()> {
+    let (total, owned): (i32, i32) = conn.query_row(
+        "SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN owned = 1 THEN 1 ELSE 0 END), 0)
+         FROM items WHERE chapter_id = ?1",
+        params![chapter_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    if total == 0 {
+        return Ok(());
+    }
+
+    let all_owned = owned == total;
+    conn.execute(
+        "UPDATE chapters SET owned = ?1 WHERE id = ?2",
+        params![all_owned as i32, chapter_id],
+    )?;
+
+    Ok(())
+}
+
 #[tauri::command]
 fn update_item(
     state: State<DbState>,
@@ -669,6 +712,13 @@ fn update_item(
             if affected == 0 {
                 return Err(rusqlite::Error::QueryReturnedNoRows);
             }
+
+            let chapter_id: i64 = conn.query_row(
+                "SELECT chapter_id FROM items WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )?;
+            sync_chapter_owned_from_items(conn, chapter_id)?;
 
             fetch_item(conn, id, &item_covers_dir)
         })
@@ -804,6 +854,11 @@ fn delete_item(state: State<DbState>, id: i64) -> Result<(), String> {
     let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
+            let chapter_id: i64 = conn.query_row(
+                "SELECT chapter_id FROM items WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )?;
             let cover_image: Option<String> = conn.query_row(
                 "SELECT cover_image FROM items WHERE id = ?1",
                 params![id],
@@ -812,6 +867,7 @@ fn delete_item(state: State<DbState>, id: i64) -> Result<(), String> {
 
             conn.execute("DELETE FROM items WHERE id = ?1", params![id])?;
             delete_cover_file(&item_covers_dir, &cover_image);
+            sync_chapter_owned_from_items(conn, chapter_id)?;
             Ok(())
         })
         .map_err(|e| e.to_string())

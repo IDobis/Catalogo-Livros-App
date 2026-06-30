@@ -32,8 +32,9 @@ import EditIcon from "@mui/icons-material/Edit";
 import { useEffect, useState } from "react";
 import BookCover from "@/components/BookCover";
 import ProgressRing from "@/components/ProgressRing";
-import { reorderChapters, type Chapter } from "@/lib/tauri";
+import { chapterDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
+import { reorderChapters, type Chapter } from "@/lib/tauri";
 
 interface ChapterSortableListProps {
   bookId: number;
@@ -118,8 +119,7 @@ function SortableChapterItem({
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
               <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                Cap. {chapter.chapter_number}
-                {chapter.chapter_title ? ` — ${chapter.chapter_title}` : ""}
+                {chapterDisplayName(chapter)}
               </Typography>
               <Chip
                 size="small"

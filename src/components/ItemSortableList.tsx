@@ -31,6 +31,7 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
 import { useEffect, useState } from "react";
 import BookCover from "@/components/BookCover";
+import { itemDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
 import { reorderItems, type Item } from "@/lib/tauri";
 
@@ -103,8 +104,7 @@ function SortableItemRow({
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
             <Typography variant="body1" sx={{ fontWeight: 600 }}>
-              Item {item.item_number}
-              {item.item_title ? ` — ${item.item_title}` : ""}
+              {itemDisplayName(item)}
             </Typography>
             <Chip
               size="small"

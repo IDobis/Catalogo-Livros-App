@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import ThemeRegistry from "@/providers/ThemeRegistry";
-import AppSettingsProvider from "@/providers/AppSettings";
+import Providers from "@/providers/Providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,9 +15,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
-        <ThemeRegistry>
-          <AppSettingsProvider>{children}</AppSettingsProvider>
-        </ThemeRegistry>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

@@ -5,10 +5,11 @@ const internalHost = process.env.TAURI_DEV_HOST || "localhost";
 
 const nextConfig: NextConfig = {
   output: "export",
+  reactStrictMode: false,
   images: {
     unoptimized: true,
   },
-  assetPrefix: isProd ? undefined : `http://${internalHost}:3000`,
+  assetPrefix: isProd ? "./" : `http://${internalHost}:3000`,
   trailingSlash: true,
 };
 
