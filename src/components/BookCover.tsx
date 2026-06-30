@@ -12,6 +12,7 @@ interface BookCoverProps {
   coverPath: string | null;
   size?: "small" | "medium" | "large" | "list";
   variant?: "collection" | "chapter" | "item";
+  cacheKey?: number;
 }
 
 const sizes = {
@@ -25,6 +26,7 @@ export default function BookCover({
   coverPath,
   size = "small",
   variant = "collection",
+  cacheKey = 0,
 }: BookCoverProps) {
   const dimensions = sizes[size];
   const PlaceholderIcon =
@@ -34,10 +36,12 @@ export default function BookCover({
         ? ArticleIcon
         : MenuBookIcon;
   const [loadError, setLoadError] = useState(false);
+  const [pathVersion, setPathVersion] = useState(0);
 
   useEffect(() => {
     setLoadError(false);
-  }, [coverPath]);
+    setPathVersion((version) => version + 1);
+  }, [coverPath, cacheKey]);
 
   if (!coverPath || loadError || !isTauri()) {
     return (
@@ -61,11 +65,13 @@ export default function BookCover({
   }
 
   const normalizedPath = coverPath.replace(/\\/g, "/");
+  const imageSrc = `${convertFileSrc(normalizedPath)}?v=${cacheKey}-${pathVersion}`;
 
   return (
     <Box
       component="img"
-      src={convertFileSrc(normalizedPath)}
+      key={imageSrc}
+      src={imageSrc}
       alt=""
       onError={() => setLoadError(true)}
       sx={{

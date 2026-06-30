@@ -29,16 +29,19 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BookCover from "@/components/BookCover";
 import ProgressRing from "@/components/ProgressRing";
 import { chapterDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
+import { matchesChapter, normalizeSearchQuery } from "@/lib/search";
 import { reorderChapters, type Chapter } from "@/lib/tauri";
 
 interface ChapterSortableListProps {
   bookId: number;
   chapters: Chapter[];
+  coverCacheKey?: number;
+  searchQuery?: string;
   onChaptersChange: (chapters: Chapter[]) => void;
   onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
@@ -48,11 +51,13 @@ interface ChapterSortableListProps {
 
 function SortableChapterItem({
   chapter,
+  coverCacheKey,
   onOpen,
   onEdit,
   onDelete,
 }: {
   chapter: Chapter;
+  coverCacheKey?: number;
   onOpen: (chapter: Chapter) => void;
   onEdit: (chapter: Chapter) => void;
   onDelete: (chapter: Chapter) => void;
@@ -115,7 +120,12 @@ function SortableChapterItem({
             cursor: "pointer",
           }}
         >
-          <BookCover coverPath={chapter.cover_path} size="small" variant="chapter" />
+          <BookCover
+            coverPath={chapter.cover_path}
+            cacheKey={coverCacheKey}
+            size="small"
+            variant="chapter"
+          />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
               <Typography variant="body1" sx={{ fontWeight: 600 }}>
@@ -172,6 +182,8 @@ function SortableChapterItem({
 export default function ChapterSortableList({
   bookId,
   chapters,
+  coverCacheKey,
+  searchQuery = "",
   onChaptersChange,
   onOpen,
   onEdit,
@@ -179,6 +191,12 @@ export default function ChapterSortableList({
   onError,
 }: ChapterSortableListProps) {
   const [items, setItems] = useState(chapters);
+  const normalizedQuery = normalizeSearchQuery(searchQuery);
+  const filteredItems = useMemo(
+    () => items.filter((chapter) => matchesChapter(chapter, normalizedQuery)),
+    [items, normalizedQuery],
+  );
+  const isSearching = normalizedQuery.length > 0;
 
   useEffect(() => {
     setItems(chapters);
@@ -230,6 +248,41 @@ export default function ChapterSortableList({
     );
   }
 
+  if (filteredItems.length === 0) {
+    return (
+      <Typography color="text.secondary">
+        Nenhum capítulo encontrado para &quot;{searchQuery.trim()}&quot;.
+      </Typography>
+    );
+  }
+
+  if (isSearching) {
+    return (
+      <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.5,
+            width: "100%",
+            maxWidth: "100%",
+          }}
+        >
+          {filteredItems.map((chapter) => (
+            <SortableChapterItem
+              key={chapter.id}
+              chapter={chapter}
+              coverCacheKey={coverCacheKey}
+              onOpen={onOpen}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
       {items.length > 1 && (
@@ -264,6 +317,7 @@ export default function ChapterSortableList({
               <SortableChapterItem
                 key={chapter.id}
                 chapter={chapter}
+                coverCacheKey={coverCacheKey}
                 onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}

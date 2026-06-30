@@ -27,14 +27,18 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BookCover from "@/components/BookCover";
 import ProgressRing from "@/components/ProgressRing";
 import { reorderBooks, type Book } from "@/lib/tauri";
+import { bookDisplayTitle } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
+import { matchesBook, normalizeSearchQuery } from "@/lib/search";
 
 interface BookSortableListProps {
   books: Book[];
+  coverCacheKey?: number;
+  searchQuery?: string;
   onBooksChange: (books: Book[]) => void;
   onOpen: (book: Book) => void;
   onEdit: (book: Book) => void;
@@ -44,11 +48,13 @@ interface BookSortableListProps {
 
 function SortableBookItem({
   book,
+  coverCacheKey,
   onOpen,
   onEdit,
   onDelete,
 }: {
   book: Book;
+  coverCacheKey?: number;
   onOpen: (book: Book) => void;
   onEdit: (book: Book) => void;
   onDelete: (book: Book) => void;
@@ -111,10 +117,15 @@ function SortableBookItem({
             cursor: "pointer",
           }}
         >
-          <BookCover coverPath={book.cover_path} size="list" variant="collection" />
+          <BookCover
+            coverPath={book.cover_path}
+            cacheKey={coverCacheKey}
+            size="list"
+            variant="collection"
+          />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              {book.title}
+              {bookDisplayTitle(book)}
             </Typography>
             {book.description && (
               <Typography
@@ -159,6 +170,8 @@ function SortableBookItem({
 
 export default function BookSortableList({
   books,
+  coverCacheKey,
+  searchQuery = "",
   onBooksChange,
   onOpen,
   onEdit,
@@ -166,6 +179,12 @@ export default function BookSortableList({
   onError,
 }: BookSortableListProps) {
   const [items, setItems] = useState(books);
+  const normalizedQuery = normalizeSearchQuery(searchQuery);
+  const filteredItems = useMemo(
+    () => items.filter((book) => matchesBook(book, normalizedQuery)),
+    [items, normalizedQuery],
+  );
+  const isSearching = normalizedQuery.length > 0;
 
   useEffect(() => {
     setItems(books);
@@ -208,6 +227,41 @@ export default function BookSortableList({
     );
   }
 
+  if (filteredItems.length === 0) {
+    return (
+      <Typography color="text.secondary" textAlign="center">
+        Nenhuma coleção encontrada para &quot;{searchQuery.trim()}&quot;.
+      </Typography>
+    );
+  }
+
+  if (isSearching) {
+    return (
+      <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.5,
+            width: "100%",
+            maxWidth: "100%",
+          }}
+        >
+          {filteredItems.map((book) => (
+            <SortableBookItem
+              key={book.id}
+              book={book}
+              coverCacheKey={coverCacheKey}
+              onOpen={onOpen}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
       {items.length > 1 && (
@@ -242,6 +296,7 @@ export default function BookSortableList({
               <SortableBookItem
                 key={book.id}
                 book={book}
+                coverCacheKey={coverCacheKey}
                 onOpen={onOpen}
                 onEdit={onEdit}
                 onDelete={onDelete}

@@ -1,16 +1,77 @@
 mod db;
+mod text_limits;
 
 use db::{backup_filename, cover_path, delete_cover_file, validate_backup_db, DbState};
+use text_limits::{parse_description, parse_optional_title, parse_required_title};
 use rusqlite::{params, Row};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
+
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
+
+fn pick_image_source(app: &AppHandle, title: &str) -> Result<PathBuf, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
+        .blocking_pick_file();
+
+    let Some(FilePath::Path(source)) = selected else {
+        return Err("Seleção de imagem cancelada.".to_string());
+    };
+
+    validate_image_source(&source)?;
+    Ok(source)
+}
+
+fn validate_image_source(source: &Path) -> Result<(), String> {
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg")
+        .to_lowercase();
+
+    if !IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err("Formato de imagem não suportado.".to_string());
+    }
+
+    Ok(())
+}
+
+fn cover_filename(entity_id: i64, source: &Path) -> String {
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg")
+        .to_lowercase();
+    format!("{entity_id}.{extension}")
+}
+
+fn copy_cover_image(
+    source: &Path,
+    entity_id: i64,
+    covers_dir: &Path,
+    old_cover: &Option<String>,
+) -> Result<String, String> {
+    let filename = cover_filename(entity_id, source);
+    let dest = covers_dir.join(&filename);
+
+    if old_cover.as_ref().is_some_and(|old| old != &filename) {
+        delete_cover_file(covers_dir, old_cover);
+    }
+
+    std::fs::copy(source, &dest).map_err(|e| format!("copiar imagem: {e}"))?;
+    Ok(filename)
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Book {
     pub id: i64,
     pub title: String,
+    pub long_titulo: Option<String>,
     pub description: Option<String>,
     pub owned: bool,
     pub cover_path: Option<String>,
@@ -24,6 +85,7 @@ pub struct Chapter {
     pub book_id: i64,
     pub chapter_number: i32,
     pub chapter_title: Option<String>,
+    pub long_titulo: Option<String>,
     pub description: Option<String>,
     pub cover_path: Option<String>,
     pub owned: bool,
@@ -37,6 +99,7 @@ pub struct Item {
     pub chapter_id: i64,
     pub item_number: i32,
     pub item_title: Option<String>,
+    pub long_titulo: Option<String>,
     pub description: Option<String>,
     pub cover_path: Option<String>,
     pub owned: bool,
@@ -52,6 +115,7 @@ const BOOK_SELECT: &str = "
     SELECT
         b.id,
         b.title,
+        b.long_titulo,
         b.description,
         b.owned,
         b.cover_image,
@@ -61,15 +125,16 @@ const BOOK_SELECT: &str = "
 ";
 
 fn row_to_book(row: &Row, covers_dir: &Path) -> rusqlite::Result<Book> {
-    let cover_image: Option<String> = row.get(4)?;
+    let cover_image: Option<String> = row.get(5)?;
     Ok(Book {
         id: row.get(0)?,
         title: row.get(1)?,
-        description: row.get(2)?,
-        owned: row.get::<_, i32>(3)? != 0,
+        long_titulo: row.get(2)?,
+        description: row.get(3)?,
+        owned: row.get::<_, i32>(4)? != 0,
         cover_path: cover_path(covers_dir, &cover_image),
-        total_chapter_count: row.get(5)?,
-        owned_chapter_count: row.get(6)?,
+        total_chapter_count: row.get(6)?,
+        owned_chapter_count: row.get(7)?,
     })
 }
 
@@ -92,9 +157,8 @@ fn save_book(
     description: Option<String>,
     owned: bool,
 ) -> Result<Book, String> {
-    if title.trim().is_empty() {
-        return Err("O título da coleção é obrigatório.".to_string());
-    }
+    let parsed = parse_required_title(&title, "O título da coleção é obrigatório.")?;
+    let description = parse_description(description)?;
 
     let covers_dir = state.book_covers_dir();
     state
@@ -106,8 +170,14 @@ fn save_book(
             )?;
 
             conn.execute(
-                "INSERT INTO books (title, description, owned, sort_order) VALUES (?1, ?2, ?3, ?4)",
-                params![title.trim(), description, owned as i32, sort_order],
+                "INSERT INTO books (title, long_titulo, description, owned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    parsed.short_title,
+                    parsed.long_titulo,
+                    description,
+                    owned as i32,
+                    sort_order
+                ],
             )?;
 
             let id = conn.last_insert_rowid();
@@ -176,16 +246,21 @@ fn update_book(
     description: Option<String>,
     owned: bool,
 ) -> Result<Book, String> {
-    if title.trim().is_empty() {
-        return Err("O título da coleção é obrigatório.".to_string());
-    }
+    let parsed = parse_required_title(&title, "O título da coleção é obrigatório.")?;
+    let description = parse_description(description)?;
 
     let covers_dir = state.book_covers_dir();
     state
         .with_conn(|conn| {
             let affected = conn.execute(
-                "UPDATE books SET title = ?1, description = ?2, owned = ?3 WHERE id = ?4",
-                params![title.trim(), description, owned as i32, id],
+                "UPDATE books SET title = ?1, long_titulo = ?2, description = ?3, owned = ?4 WHERE id = ?5",
+                params![
+                    parsed.short_title,
+                    parsed.long_titulo,
+                    description,
+                    owned as i32,
+                    id
+                ],
             )?;
 
             if affected == 0 {
@@ -238,31 +313,24 @@ fn delete_book(state: State<DbState>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn pick_image_file(app: AppHandle, title: String) -> Result<String, String> {
+    pick_image_source(&app, &title).map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn set_book_cover(app: AppHandle, state: State<DbState>, book_id: i64) -> Result<Book, String> {
-    let selected = app
-        .dialog()
-        .file()
-        .set_title("Escolher capa da coleção")
-        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
-        .blocking_pick_file();
+    let source = pick_image_source(&app, "Escolher capa da coleção")?;
+    set_book_cover_from_path(state, book_id, source.to_string_lossy().to_string())
+}
 
-    let Some(FilePath::Path(source)) = selected else {
-        return Err("Seleção de imagem cancelada.".to_string());
-    };
-
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg")
-        .to_lowercase();
-
-    let allowed = ["png", "jpg", "jpeg", "webp", "gif"];
-    if !allowed.contains(&extension.as_str()) {
-        return Err("Formato de imagem não suportado.".to_string());
-    }
-
-    let filename = format!("{book_id}.{extension}");
-    let dest = state.book_covers_dir().join(&filename);
+#[tauri::command]
+fn set_book_cover_from_path(
+    state: State<DbState>,
+    book_id: i64,
+    source_path: String,
+) -> Result<Book, String> {
+    let source = PathBuf::from(&source_path);
+    validate_image_source(&source)?;
     let covers_dir = state.book_covers_dir();
 
     state
@@ -273,12 +341,8 @@ fn set_book_cover(app: AppHandle, state: State<DbState>, book_id: i64) -> Result
                 |row| row.get(0),
             )?;
 
-            if old_cover.as_ref().is_some_and(|old| old != &filename) {
-                delete_cover_file(&covers_dir, &old_cover);
-            }
-
-            std::fs::copy(&source, &dest)
-                .map_err(|e| rusqlite::Error::InvalidPath(format!("copiar imagem: {e}").into()))?;
+            let filename = copy_cover_image(&source, book_id, &covers_dir, &old_cover)
+                .map_err(|e| rusqlite::Error::InvalidPath(e.into()))?;
 
             let affected = conn.execute(
                 "UPDATE books SET cover_image = ?1 WHERE id = ?2",
@@ -325,6 +389,9 @@ fn save_chapter(
     description: Option<String>,
     owned: bool,
 ) -> Result<Chapter, String> {
+    let (chapter_title, long_titulo) = parse_optional_title(chapter_title)?;
+    let description = parse_description(description)?;
+
     let chapter_covers_dir = state.chapter_covers_dir();
     state
         .with_conn(|conn| {
@@ -335,11 +402,12 @@ fn save_chapter(
             )?;
 
             conn.execute(
-                "INSERT INTO chapters (book_id, chapter_number, chapter_title, description, owned) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO chapters (book_id, chapter_number, chapter_title, long_titulo, description, owned) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     book_id,
                     chapter_number,
                     chapter_title,
+                    long_titulo,
                     description,
                     owned as i32
                 ],
@@ -357,6 +425,7 @@ const CHAPTER_SELECT: &str = "
         c.book_id,
         c.chapter_number,
         c.chapter_title,
+        c.long_titulo,
         c.description,
         c.cover_image,
         c.owned,
@@ -366,17 +435,18 @@ const CHAPTER_SELECT: &str = "
 ";
 
 fn row_to_chapter(row: &Row, chapter_covers_dir: &Path) -> rusqlite::Result<Chapter> {
-    let cover_image: Option<String> = row.get(5)?;
+    let cover_image: Option<String> = row.get(6)?;
     Ok(Chapter {
         id: row.get(0)?,
         book_id: row.get(1)?,
         chapter_number: row.get(2)?,
         chapter_title: row.get(3)?,
-        description: row.get(4)?,
+        long_titulo: row.get(4)?,
+        description: row.get(5)?,
         cover_path: cover_path(chapter_covers_dir, &cover_image),
-        owned: row.get::<_, i32>(6)? != 0,
-        total_item_count: row.get(7)?,
-        owned_item_count: row.get(8)?,
+        owned: row.get::<_, i32>(7)? != 0,
+        total_item_count: row.get(8)?,
+        owned_item_count: row.get(9)?,
     })
 }
 
@@ -416,12 +486,15 @@ fn update_chapter(
     description: Option<String>,
     owned: bool,
 ) -> Result<Chapter, String> {
+    let (chapter_title, long_titulo) = parse_optional_title(chapter_title)?;
+    let description = parse_description(description)?;
+
     let chapter_covers_dir = state.chapter_covers_dir();
     state
         .with_conn(|conn| {
             let affected = conn.execute(
-                "UPDATE chapters SET chapter_title = ?1, description = ?2, owned = ?3 WHERE id = ?4",
-                params![chapter_title, description, owned as i32, id],
+                "UPDATE chapters SET chapter_title = ?1, long_titulo = ?2, description = ?3, owned = ?4 WHERE id = ?5",
+                params![chapter_title, long_titulo, description, owned as i32, id],
             )?;
 
             if affected == 0 {
@@ -439,30 +512,22 @@ fn set_chapter_cover(
     state: State<DbState>,
     chapter_id: i64,
 ) -> Result<Chapter, String> {
-    let selected = app
-        .dialog()
-        .file()
-        .set_title("Escolher imagem do capítulo")
-        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
-        .blocking_pick_file();
+    let source = pick_image_source(&app, "Escolher imagem do capítulo")?;
+    set_chapter_cover_from_path(
+        state,
+        chapter_id,
+        source.to_string_lossy().to_string(),
+    )
+}
 
-    let Some(FilePath::Path(source)) = selected else {
-        return Err("Seleção de imagem cancelada.".to_string());
-    };
-
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg")
-        .to_lowercase();
-
-    let allowed = ["png", "jpg", "jpeg", "webp", "gif"];
-    if !allowed.contains(&extension.as_str()) {
-        return Err("Formato de imagem não suportado.".to_string());
-    }
-
-    let filename = format!("{chapter_id}.{extension}");
-    let dest = state.chapter_covers_dir().join(&filename);
+#[tauri::command]
+fn set_chapter_cover_from_path(
+    state: State<DbState>,
+    chapter_id: i64,
+    source_path: String,
+) -> Result<Chapter, String> {
+    let source = PathBuf::from(&source_path);
+    validate_image_source(&source)?;
     let chapter_covers_dir = state.chapter_covers_dir();
 
     state
@@ -473,12 +538,9 @@ fn set_chapter_cover(
                 |row| row.get(0),
             )?;
 
-            if old_cover.as_ref().is_some_and(|old| old != &filename) {
-                delete_cover_file(&chapter_covers_dir, &old_cover);
-            }
-
-            std::fs::copy(&source, &dest)
-                .map_err(|e| rusqlite::Error::InvalidPath(format!("copiar imagem: {e}").into()))?;
+            let filename =
+                copy_cover_image(&source, chapter_id, &chapter_covers_dir, &old_cover)
+                    .map_err(|e| rusqlite::Error::InvalidPath(e.into()))?;
 
             let affected = conn.execute(
                 "UPDATE chapters SET cover_image = ?1 WHERE id = ?2",
@@ -596,6 +658,9 @@ fn save_item(
     description: Option<String>,
     owned: bool,
 ) -> Result<Item, String> {
+    let (item_title, long_titulo) = parse_optional_title(item_title)?;
+    let description = parse_description(description)?;
+
     let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
@@ -606,11 +671,12 @@ fn save_item(
             )?;
 
             conn.execute(
-                "INSERT INTO items (chapter_id, item_number, item_title, description, owned) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO items (chapter_id, item_number, item_title, long_titulo, description, owned) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     chapter_id,
                     item_number,
                     item_title,
+                    long_titulo,
                     description,
                     owned as i32
                 ],
@@ -624,15 +690,16 @@ fn save_item(
 }
 
 fn row_to_item(row: &Row, item_covers_dir: &Path) -> rusqlite::Result<Item> {
-    let cover_image: Option<String> = row.get(5)?;
+    let cover_image: Option<String> = row.get(6)?;
     Ok(Item {
         id: row.get(0)?,
         chapter_id: row.get(1)?,
         item_number: row.get(2)?,
         item_title: row.get(3)?,
-        description: row.get(4)?,
+        long_titulo: row.get(4)?,
+        description: row.get(5)?,
         cover_path: cover_path(item_covers_dir, &cover_image),
-        owned: row.get::<_, i32>(6)? != 0,
+        owned: row.get::<_, i32>(7)? != 0,
     })
 }
 
@@ -642,7 +709,7 @@ fn fetch_item(
     item_covers_dir: &Path,
 ) -> rusqlite::Result<Item> {
     conn.query_row(
-        "SELECT id, chapter_id, item_number, item_title, description, cover_image, owned
+        "SELECT id, chapter_id, item_number, item_title, long_titulo, description, cover_image, owned
          FROM items WHERE id = ?1",
         params![id],
         |row| row_to_item(row, item_covers_dir),
@@ -655,7 +722,7 @@ fn fetch_items(
     item_covers_dir: &Path,
 ) -> rusqlite::Result<Vec<Item>> {
     let mut stmt = conn.prepare(
-        "SELECT id, chapter_id, item_number, item_title, description, cover_image, owned
+        "SELECT id, chapter_id, item_number, item_title, long_titulo, description, cover_image, owned
          FROM items WHERE chapter_id = ?1
          ORDER BY item_number ASC",
     )?;
@@ -701,12 +768,15 @@ fn update_item(
     description: Option<String>,
     owned: bool,
 ) -> Result<Item, String> {
+    let (item_title, long_titulo) = parse_optional_title(item_title)?;
+    let description = parse_description(description)?;
+
     let item_covers_dir = state.item_covers_dir();
     state
         .with_conn(|conn| {
             let affected = conn.execute(
-                "UPDATE items SET item_title = ?1, description = ?2, owned = ?3 WHERE id = ?4",
-                params![item_title, description, owned as i32, id],
+                "UPDATE items SET item_title = ?1, long_titulo = ?2, description = ?3, owned = ?4 WHERE id = ?5",
+                params![item_title, long_titulo, description, owned as i32, id],
             )?;
 
             if affected == 0 {
@@ -727,30 +797,18 @@ fn update_item(
 
 #[tauri::command]
 fn set_item_cover(app: AppHandle, state: State<DbState>, item_id: i64) -> Result<Item, String> {
-    let selected = app
-        .dialog()
-        .file()
-        .set_title("Escolher imagem do item")
-        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "gif"])
-        .blocking_pick_file();
+    let source = pick_image_source(&app, "Escolher imagem do item")?;
+    set_item_cover_from_path(state, item_id, source.to_string_lossy().to_string())
+}
 
-    let Some(FilePath::Path(source)) = selected else {
-        return Err("Seleção de imagem cancelada.".to_string());
-    };
-
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg")
-        .to_lowercase();
-
-    let allowed = ["png", "jpg", "jpeg", "webp", "gif"];
-    if !allowed.contains(&extension.as_str()) {
-        return Err("Formato de imagem não suportado.".to_string());
-    }
-
-    let filename = format!("{item_id}.{extension}");
-    let dest = state.item_covers_dir().join(&filename);
+#[tauri::command]
+fn set_item_cover_from_path(
+    state: State<DbState>,
+    item_id: i64,
+    source_path: String,
+) -> Result<Item, String> {
+    let source = PathBuf::from(&source_path);
+    validate_image_source(&source)?;
     let item_covers_dir = state.item_covers_dir();
 
     state
@@ -761,12 +819,8 @@ fn set_item_cover(app: AppHandle, state: State<DbState>, item_id: i64) -> Result
                 |row| row.get(0),
             )?;
 
-            if old_cover.as_ref().is_some_and(|old| old != &filename) {
-                delete_cover_file(&item_covers_dir, &old_cover);
-            }
-
-            std::fs::copy(&source, &dest)
-                .map_err(|e| rusqlite::Error::InvalidPath(format!("copiar imagem: {e}").into()))?;
+            let filename = copy_cover_image(&source, item_id, &item_covers_dir, &old_cover)
+                .map_err(|e| rusqlite::Error::InvalidPath(e.into()))?;
 
             let affected = conn.execute(
                 "UPDATE items SET cover_image = ?1 WHERE id = ?2",
@@ -974,11 +1028,14 @@ pub fn run() {
             reorder_books,
             update_book,
             delete_book,
+            pick_image_file,
             set_book_cover,
+            set_book_cover_from_path,
             remove_book_cover,
             save_chapter,
             update_chapter,
             set_chapter_cover,
+            set_chapter_cover_from_path,
             remove_chapter_cover,
             list_chapters,
             reorder_chapters,
@@ -986,6 +1043,7 @@ pub fn run() {
             save_item,
             update_item,
             set_item_cover,
+            set_item_cover_from_path,
             remove_item_cover,
             list_items,
             reorder_items,

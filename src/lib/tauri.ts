@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Book {
   id: number;
   title: string;
+  long_titulo: string | null;
   description: string | null;
   owned: boolean;
   cover_path: string | null;
@@ -15,6 +16,7 @@ export interface Chapter {
   book_id: number;
   chapter_number: number;
   chapter_title: string | null;
+  long_titulo: string | null;
   description: string | null;
   cover_path: string | null;
   owned: boolean;
@@ -27,6 +29,7 @@ export interface Item {
   chapter_id: number;
   item_number: number;
   item_title: string | null;
+  long_titulo: string | null;
   description: string | null;
   cover_path: string | null;
   owned: boolean;
@@ -84,6 +87,13 @@ export async function setBookCover(bookId: number): Promise<Book> {
   return invokeCommand<Book>("set_book_cover", { bookId });
 }
 
+export async function setBookCoverFromPath(
+  bookId: number,
+  sourcePath: string,
+): Promise<Book> {
+  return invokeCommand<Book>("set_book_cover_from_path", { bookId, sourcePath });
+}
+
 export async function removeBookCover(bookId: number): Promise<Book> {
   return invokeCommand<Book>("remove_book_cover", { bookId });
 }
@@ -118,6 +128,16 @@ export async function updateChapter(
 
 export async function setChapterCover(chapterId: number): Promise<Chapter> {
   return invokeCommand<Chapter>("set_chapter_cover", { chapterId });
+}
+
+export async function setChapterCoverFromPath(
+  chapterId: number,
+  sourcePath: string,
+): Promise<Chapter> {
+  return invokeCommand<Chapter>("set_chapter_cover_from_path", {
+    chapterId,
+    sourcePath,
+  });
 }
 
 export async function removeChapterCover(chapterId: number): Promise<Chapter> {
@@ -171,6 +191,13 @@ export async function setItemCover(itemId: number): Promise<Item> {
   return invokeCommand<Item>("set_item_cover", { itemId });
 }
 
+export async function setItemCoverFromPath(
+  itemId: number,
+  sourcePath: string,
+): Promise<Item> {
+  return invokeCommand<Item>("set_item_cover_from_path", { itemId, sourcePath });
+}
+
 export async function removeItemCover(itemId: number): Promise<Item> {
   return invokeCommand<Item>("remove_item_cover", { itemId });
 }
@@ -200,6 +227,10 @@ export async function exportDatabase(): Promise<BackupResult> {
 
 export async function importDatabase(): Promise<BackupResult> {
   return invokeCommand<BackupResult>("import_database");
+}
+
+export async function pickImageFile(title: string): Promise<string> {
+  return invokeCommand<string>("pick_image_file", { title });
 }
 
 export { isTauri };

@@ -29,15 +29,18 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import EditIcon from "@mui/icons-material/Edit";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BookCover from "@/components/BookCover";
 import { itemDisplayName } from "@/lib/labels";
 import { sortableListModifiers } from "@/lib/dnd";
+import { matchesItem, normalizeSearchQuery } from "@/lib/search";
 import { reorderItems, type Item } from "@/lib/tauri";
 
 interface ItemSortableListProps {
   chapterId: number;
   items: Item[];
+  coverCacheKey?: number;
+  searchQuery?: string;
   onItemsChange: (items: Item[]) => void;
   onEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
@@ -46,10 +49,12 @@ interface ItemSortableListProps {
 
 function SortableItemRow({
   item,
+  coverCacheKey,
   onEdit,
   onDelete,
 }: {
   item: Item;
+  coverCacheKey?: number;
   onEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
 }) {
@@ -100,7 +105,12 @@ function SortableItemRow({
         >
           <DragIndicatorIcon fontSize="small" color="action" />
         </IconButton>
-        <BookCover coverPath={item.cover_path} size="small" variant="item" />
+        <BookCover
+          coverPath={item.cover_path}
+          cacheKey={coverCacheKey}
+          size="small"
+          variant="item"
+        />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
             <Typography variant="body1" sx={{ fontWeight: 600 }}>
@@ -152,12 +162,20 @@ function SortableItemRow({
 export default function ItemSortableList({
   chapterId,
   items,
+  coverCacheKey,
+  searchQuery = "",
   onItemsChange,
   onEdit,
   onDelete,
   onError,
 }: ItemSortableListProps) {
   const [listItems, setListItems] = useState(items);
+  const normalizedQuery = normalizeSearchQuery(searchQuery);
+  const filteredItems = useMemo(
+    () => listItems.filter((item) => matchesItem(item, normalizedQuery)),
+    [listItems, normalizedQuery],
+  );
+  const isSearching = normalizedQuery.length > 0;
 
   useEffect(() => {
     setListItems(items);
@@ -209,6 +227,40 @@ export default function ItemSortableList({
     );
   }
 
+  if (filteredItems.length === 0) {
+    return (
+      <Typography color="text.secondary">
+        Nenhum item encontrado para &quot;{searchQuery.trim()}&quot;.
+      </Typography>
+    );
+  }
+
+  if (isSearching) {
+    return (
+      <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.5,
+            width: "100%",
+            maxWidth: "100%",
+          }}
+        >
+          {filteredItems.map((item) => (
+            <SortableItemRow
+              key={item.id}
+              item={item}
+              coverCacheKey={coverCacheKey}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ overflow: "hidden", width: "100%", maxWidth: "100%" }}>
       {listItems.length > 1 && (
@@ -243,6 +295,7 @@ export default function ItemSortableList({
               <SortableItemRow
                 key={item.id}
                 item={item}
+                coverCacheKey={coverCacheKey}
                 onEdit={onEdit}
                 onDelete={onDelete}
               />

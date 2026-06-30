@@ -118,7 +118,7 @@ export default function BackupDialog({
               <Stack direction="row" spacing={2}>
                 <Button
                   variant="outlined"
-                  startIcon={<FileDownloadIcon />}
+                  startIcon={<FileUploadIcon />}
                   onClick={handleExport}
                   disabled={loading}
                 >
@@ -127,7 +127,7 @@ export default function BackupDialog({
                 <Button
                   variant="outlined"
                   color="warning"
-                  startIcon={<FileUploadIcon />}
+                  startIcon={<FileDownloadIcon />}
                   onClick={() => setConfirmImport(true)}
                   disabled={loading}
                 >

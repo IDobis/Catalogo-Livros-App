@@ -158,12 +158,61 @@ fn migrate(conn: &Connection) -> Result<()> {
                 chapter_id  INTEGER NOT NULL,
                 item_number INTEGER NOT NULL,
                 item_title  TEXT,
+                long_titulo TEXT,
                 description TEXT,
                 cover_image TEXT,
                 owned       INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
             );",
         )?;
+    }
+
+    if !column_exists(conn, "books", "long_titulo")? {
+        conn.execute("ALTER TABLE books ADD COLUMN long_titulo TEXT", [])?;
+    }
+
+    if !column_exists(conn, "chapters", "long_titulo")? {
+        conn.execute("ALTER TABLE chapters ADD COLUMN long_titulo TEXT", [])?;
+    }
+
+    if !column_exists(conn, "items", "long_titulo")? {
+        conn.execute("ALTER TABLE items ADD COLUMN long_titulo TEXT", [])?;
+    }
+
+    migrate_existing_long_titles(conn)?;
+
+    Ok(())
+}
+
+fn migrate_existing_long_titles(conn: &Connection) -> Result<()> {
+    migrate_table_long_titles(conn, "books", "title")?;
+    migrate_table_long_titles(conn, "chapters", "chapter_title")?;
+    migrate_table_long_titles(conn, "items", "item_title")?;
+    Ok(())
+}
+
+fn migrate_table_long_titles(conn: &Connection, table: &str, title_column: &str) -> Result<()> {
+    let query = format!("SELECT id, {title_column} FROM {table} WHERE long_titulo IS NULL");
+    let mut stmt = conn.prepare(&query)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for (id, title) in rows {
+        let Some(title) = title else {
+            continue;
+        };
+        if title.chars().count() <= crate::text_limits::TITLE_SHORT_MAX {
+            continue;
+        }
+        let short_title: String = title
+            .chars()
+            .take(crate::text_limits::TITLE_SHORT_MAX)
+            .collect();
+        let update = format!("UPDATE {table} SET {title_column} = ?1, long_titulo = ?2 WHERE id = ?3");
+        conn.execute(&update, rusqlite::params![short_title, title, id])?;
     }
 
     Ok(())
